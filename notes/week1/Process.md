@@ -11,10 +11,10 @@
 - Definition: A running program
 - Program is static (sits on disk) until OS transforms it into an active process
 
-## Low-level Mechanisms
+### Low-level Mechanisms
 - Needed to implement processes
 
-# Higher-level Policies
+### Higher-level Policies
 - Required to schedule processes in an intelligent way
 
 ### Policies
@@ -57,7 +57,7 @@
    - Program stack (local variables, parameters, return addresses)
    - Program heap (dynamic data structures)
 3. Initialize I/O tasks (Input/Output)
-4. ![Loading: From Program To Process](https://github.com/user-attachments/assets/13b97174-0c14-48c4-9ab8-4d2b7bf2119b).
+4. ![Loading: From Program To Process](<img src="https://github.com/user-attachments/assets/13b97174-0c14-48c4-9ab8-4d2b7bf2119b" width="50%"/>)
 
 ### Process States
 1. **Running**
@@ -79,7 +79,7 @@
       - Allows the parent process (created the process) to examine the return code of the process
       - Unix-based systems return zero if task was completed, else a non-zero
 
-## OS Scheduler
+### OS Scheduler
 - Manages process execution
 - Determines:
   - Which process runs
@@ -88,14 +88,14 @@
 - Ensures efficient CPU utilization
 - Implements fair time-sharing between processes
 
-## APIs in modern OS (System Calls)
+### APIs in modern OS (System Calls)
 - Create
 - Destroy
 - Wait
 - Miscellaneous Control
 - Status
 
-## Data Structures within an OS
+### Data Structures within an OS
 1. **Process list (task list)** 
    - for all processes that are ready 
    - additional information to track which process is currently running
