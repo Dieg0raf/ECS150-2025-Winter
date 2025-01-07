@@ -57,7 +57,7 @@
    - Program stack (local variables, parameters, return addresses)
    - Program heap (dynamic data structures)
 3. Initialize I/O tasks (Input/Output)
-4. ![Loading: From Program To Process](<img src="https://github.com/user-attachments/assets/13b97174-0c14-48c4-9ab8-4d2b7bf2119b" width="50%"/>)
+4. <img src="https://github.com/user-attachments/assets/13b97174-0c14-48c4-9ab8-4d2b7bf2119b" width="50%"/>
 
 ### Process States
 1. **Running**
