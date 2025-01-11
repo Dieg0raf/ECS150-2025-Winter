@@ -1,0 +1,11 @@
+The open command opens a file (or a directory or URL), just as if you had
+double-clicked the file's icon. If no application name is specified, the
+default application as determined via LaunchServices is used to open the
+specified files.
+
+If the file is in the form of a URL, the file will be opened as a URL.
+
+You can specify one or more file names (or pathnames), which are
+interpreted relative to the shell or Terminal window's current working
+directory. For example, the following command would open all Word files
+in the current working directory:
