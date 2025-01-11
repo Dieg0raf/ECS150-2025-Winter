@@ -11,7 +11,10 @@
 
 using namespace std;
 
-// system call is a way for the OS to invoke the process
+// FACTS:
+// System call are ways for a process to request services from the OS.
+// Always check for errors if making system calls.
+// read() invokes the OS read system call to read data from the file descriptor. Therefore, making buffer to low will make it read less data at a time (not efficient).
 
 int main(int argc, char* argv[])
 {
@@ -22,6 +25,7 @@ int main(int argc, char* argv[])
     }
 
     else {
+        // request the OS to open a file
         fd = open(argv[1], O_RDONLY);
         if (fd == -1) {
             cerr << "Error opening file" << argv[1] << endl;
@@ -32,8 +36,7 @@ int main(int argc, char* argv[])
         char buffer[4096];
         int ret;
 
-        // read() invokes the OS read system call to read data from the file descriptor.
-        // Therefore, making buffer to low will make it read less data at a time (not efficient).
+        // request the OS to read from a file
         while ((ret = read(fd, buffer, sizeof(buffer))) > 0) {
             bytesRead += ret;
         }
@@ -58,7 +61,10 @@ int main(int argc, char* argv[])
 
         // include while loop incase write fails (OS might not write all the bytes)
         while (bytes_remaining > 0) {
+
+            // request the OS to write to a file
             ret = write(STDOUT_FILENO, current_position, bytes_remaining);
+
             if (ret == -1) {
                 cerr << "Cout not write to stdout" << endl;
                 return 1;
@@ -70,8 +76,6 @@ int main(int argc, char* argv[])
             // move point forward by 'ret' amount of bytes
             current_position += ret;
         }
-
-        // Always check for errors if making system calls
 
         return 0;
     }
