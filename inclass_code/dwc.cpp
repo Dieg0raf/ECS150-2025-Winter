@@ -31,52 +31,52 @@ int main(int argc, char* argv[])
             cerr << "Error opening file" << argv[1] << endl;
             return 1;
         }
+    }
 
-        int bytesRead = 0;
-        char buffer[4096];
-        int ret;
+    int bytesRead = 0;
+    char buffer[4096];
+    int ret;
 
-        // request the OS to read from a file
-        while ((ret = read(fd, buffer, sizeof(buffer))) > 0) {
-            bytesRead += ret;
-        }
+    // request the OS to read from a file
+    while ((ret = read(fd, buffer, sizeof(buffer))) > 0) {
+        bytesRead += ret;
+    }
+
+    if (ret == -1) {
+        cerr << "Error reading file descriptor" << endl;
+        return 1;
+    }
+
+    // Equivalent: cout << "Bytes read: " << bytesRead << endl;
+    stringstream stringStream;
+    stringStream << "Bytes read: " << bytesRead << endl;
+
+    // convert to C++ string
+    string str = stringStream.str();
+
+    // Keep track of bytes that need to be written
+    size_t bytes_remaining = str.length();
+
+    // convert to C string (system calls only read in C)
+    const char* current_position = str.c_str();
+
+    // include while loop incase write fails (OS might not write all the bytes)
+    while (bytes_remaining > 0) {
+
+        // request the OS to write to a file
+        ret = write(STDOUT_FILENO, current_position, bytes_remaining);
 
         if (ret == -1) {
-            cerr << "Error reading file descriptor" << endl;
+            cerr << "Cout not write to stdout" << endl;
             return 1;
         }
 
-        // Equivalent: cout << "Bytes read: " << bytesRead << endl;
-        stringstream stringStream;
-        stringStream << "Bytes read: " << bytesRead << endl;
+        // decrease the amount of bytes remaining (write() returns the bytes which were written)
+        bytes_remaining -= ret;
 
-        // convert to C++ string
-        string str = stringStream.str();
-
-        // Keep track of bytes that need to be written
-        size_t bytes_remaining = str.length();
-
-        // convert to C string (system calls only read in C)
-        const char* current_position = str.c_str();
-
-        // include while loop incase write fails (OS might not write all the bytes)
-        while (bytes_remaining > 0) {
-
-            // request the OS to write to a file
-            ret = write(STDOUT_FILENO, current_position, bytes_remaining);
-
-            if (ret == -1) {
-                cerr << "Cout not write to stdout" << endl;
-                return 1;
-            }
-
-            // decrease the amount of bytes remaining (write() returns the bytes which were written)
-            bytes_remaining -= ret;
-
-            // move point forward by 'ret' amount of bytes
-            current_position += ret;
-        }
-
-        return 0;
+        // move point forward by 'ret' amount of bytes
+        current_position += ret;
     }
+
+    return 0;
 }
