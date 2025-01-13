@@ -6,7 +6,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 
 // argc: The number of command-line arguments (including the program name)
 // argv: An array of C-style strings containing the arguments
@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
 
     // no files are specified on the command line
     if (argc == 1) {
-        std::cout << "no file was specifed" << std::endl;
+        std::cout << "wcat: no file was specifed" << std::endl;
         return 0;
     }
 
@@ -24,6 +24,7 @@ int main(int argc, char* argv[])
 
         // open file (get file descriptor)
         int fd = open(argv[i], O_RDONLY);
+        int w1;
 
         if (fd < 0) {
             std::cerr << "wcat: cannot open file" << std::endl;
@@ -38,7 +39,10 @@ int main(int argc, char* argv[])
         while (bytesRead > 0) {
 
             // terminal output (empty buffer)
-            write(STDOUT_FILENO, buffer, bytesRead);
+            w1 = write(STDOUT_FILENO, buffer, bytesRead);
+            if (w1 == -1) {
+                std::cerr << "wcat: error writing to standard output" << std::endl;
+            }
             bytesRead = read(fd, buffer, BUFFER_SIZE);
         }
 
