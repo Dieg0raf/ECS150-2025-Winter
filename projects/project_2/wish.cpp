@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <vector>
 
+// Trim string
 std::string trim(const std::string& str)
 {
     size_t first = str.find_first_not_of(" \t\n\r");
@@ -18,6 +19,22 @@ std::string trim(const std::string& str)
     return str.substr(first, (last - first + 1));
 }
 
+// Remove trailing slashes from path (keeps paths the same - no trailing slash)
+std::string standardizePath(std::string path)
+{
+    while (!path.empty() && path.back() == '/') {
+        path.pop_back();
+    }
+    return path;
+}
+
+// Creates executable path
+std::string getExecutablePath(const std::string& directory, const std::string& command)
+{
+    return directory + "/" + command;
+}
+
+// Prints general error
 void printError()
 {
     char error_message[30] = "An error has occurred\n";
@@ -27,31 +44,42 @@ void printError()
     }
 }
 
-void handleChildProcess(std::string& command, std::istringstream& stream)
+// Handles the child process
+void handleChildProcess(std::string& command, std::istringstream& stream, std::vector<std::string>& searchPaths)
 {
-    // Store args in vector & add binary path to args
-    std::vector<std::string> args;
-    std::string binaryFilePath = "/bin/" + command;
-    args.push_back(binaryFilePath);
+    std::string binaryFilePath;
+    ssize_t isAccessible;
 
+    // check if a file exists in a directory and is executable
+    for (unsigned i = 0; i < searchPaths.size(); i++) {
+        std::string searchPath = getExecutablePath(searchPaths[i], command);
+        isAccessible = access(searchPath.c_str(), X_OK);
+        if (isAccessible == 0) {
+            binaryFilePath = searchPath;
+            break;
+        }
+    }
+
+    if (isAccessible == -1) {
+        printError();
+        exit(1);
+    }
+
+    // add search path to args & store stream of args into new args vector
+    std::vector<std::string> args;
     std::string arg;
+    args.push_back(binaryFilePath);
     while (stream >> arg) {
         args.push_back(arg);
-        std::cout << "argument: " << arg << std::endl;
     }
 
     // allocate array of pointers
     char** argv = new char*[args.size() + 1];
 
-    // Convert to C strings and allocate memory for each string into argv array (holds arguments to put into execv() sys call)
+    // convert to C strings and allocate memory for each string into argv array (holds arguments to put into execv() sys call)
     for (size_t i = 0; i < args.size(); i++) {
         argv[i] = strdup(args[i].c_str());
-        if (i == 0) {
-            // std::cout << "command: " << args[i].c_str() << std::endl;
-        }
-        // std::cout << args[i].c_str() << std::endl;
     }
-
     argv[args.size()] = NULL;
 
     // swap program in child process and run new program (check if execv fails)
@@ -60,9 +88,7 @@ void handleChildProcess(std::string& command, std::istringstream& stream)
         for (size_t i = 0; i < args.size(); i++) {
             free(argv[i]);
         }
-
         delete[] argv;
-
         printError();
         exit(1);
     }
@@ -75,6 +101,11 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
+    // Initialize search paths
+    std::vector<std::string> searchPaths;
+    searchPaths.push_back("/bin");
+
+    // Keep prompting user to give command
     while (true) {
         std::string input;
         std::cout << "wish> ";
@@ -97,51 +128,55 @@ int main(int argc, char* argv[])
             exit(0);
         }
 
+        // built-in 'path' command
+        else if (command == "path") {
+            // clear previous paths
+            searchPaths.clear();
+
+            // set new paths
+            std::string binPath;
+            while (stream >> binPath) {
+                searchPaths.push_back(standardizePath(binPath));
+            }
+        }
+
         // built-in 'cd' command
-        if (command == "cd") {
+        else if (command == "cd") {
 
             std::string dirPath;
-            int16_t count = 0;
+            int16_t argCount = 0;
             while (stream >> dirPath) {
-                count++;
+                argCount++;
             }
 
-            if (count > 1) {
-                // std::cout << "to many arguments passed" << std::endl;
+            if (argCount > 1) {
                 printError();
                 continue;
             }
 
             if (chdir(dirPath.c_str()) == -1) {
-                // std::cout << "changing directories failed: " << errno << std::endl;
                 printError();
                 continue;
             }
-            continue;
         }
 
-        // fork process (error check)
-        pid_t childPID = fork();
-        if (childPID == -1) {
-            std::cerr << "Fork failed" << std::endl;
-            continue;
-        }
-
-        // handle parent or child process
-        if (childPID == 0) {
-            // std::cout << "In the child process: " << getpid() << std::endl;
-            handleChildProcess(command, stream);
-        } else {
-
-            if (wait(NULL) == -1) {
-                std::cerr << errno << std::endl;
+        else {
+            // fork process (error check)
+            pid_t childPID = fork();
+            if (childPID == -1) {
+                printError();
+                continue;
             }
 
-            // std::cout << "In the parent process: " << getpid() << std::endl;
-            // std::cout << "Waited for child process: " << childPID << std::endl;
-        }
+            // handle parent or child process
+            if (childPID == 0) {
+                handleChildProcess(command, stream, searchPaths);
+            }
 
-        // std::cout << "I'm done" << std::endl;
+            if (wait(NULL) == -1) {
+                printError();
+            }
+        }
     }
 
     return 0;
