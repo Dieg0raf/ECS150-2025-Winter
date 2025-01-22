@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdio.h>
@@ -39,13 +40,12 @@ void printError()
 {
     char error_message[30] = "An error has occurred\n";
     if (write(STDERR_FILENO, error_message, strlen(error_message)) == -1) {
-        // If write fails, exit immediately
         exit(1);
     }
 }
 
 // Handles the child process
-void handleChildProcess(std::string& command, std::istringstream& stream, std::vector<std::string>& searchPaths)
+void handleChildProcess(const std::string& command, std::istringstream& stream, const std::vector<std::string>& searchPaths)
 {
     std::string binaryFilePath;
     ssize_t isAccessible;
@@ -70,13 +70,13 @@ void handleChildProcess(std::string& command, std::istringstream& stream, std::v
     std::string arg;
     args.push_back(binaryFilePath);
     while (stream >> arg) {
+        // if (arg == ">") {
+        // }
         args.push_back(arg);
     }
 
-    // allocate array of pointers
-    char** argv = new char*[args.size() + 1];
-
     // convert to C strings and allocate memory for each string into argv array (holds arguments to put into execv() sys call)
+    char** argv = new char*[args.size() + 1];
     for (size_t i = 0; i < args.size(); i++) {
         argv[i] = strdup(args[i].c_str());
     }
@@ -84,7 +84,6 @@ void handleChildProcess(std::string& command, std::istringstream& stream, std::v
 
     // swap program in child process and run new program (check if execv fails)
     if (execv(argv[0], argv) == -1) {
-        // Cleanup if exec fails
         for (size_t i = 0; i < args.size(); i++) {
             free(argv[i]);
         }
@@ -94,25 +93,27 @@ void handleChildProcess(std::string& command, std::istringstream& stream, std::v
     }
 }
 
-int main(int argc, char* argv[])
+bool runShell(std::istream& input, bool isInteractive)
 {
-    if (argc > 2) {
-        printError();
-        exit(1);
-    }
 
     // Initialize search paths
     std::vector<std::string> searchPaths;
     searchPaths.push_back("/bin");
 
-    // Keep prompting user to give command
+    // Run shell
     while (true) {
-        std::string input;
-        std::cout << "wish> ";
-        std::getline(std::cin, input);
-        std::istringstream stream(input);
+        if (isInteractive) {
+            std::cout << "wish> ";
+        }
+
+        // get full line from input (could either be one or more lines)
+        std::string line;
+        if (!getline(input, line)) {
+            break;
+        }
 
         // get first word (command)
+        std::istringstream stream(line);
         std::string command;
         if (!(stream >> command)) {
             // Empty input, show prompt again
@@ -144,7 +145,7 @@ int main(int argc, char* argv[])
         else if (command == "cd") {
 
             std::string dirPath;
-            int16_t argCount = 0;
+            size_t argCount = 0;
             while (stream >> dirPath) {
                 argCount++;
             }
@@ -161,7 +162,7 @@ int main(int argc, char* argv[])
         }
 
         else {
-            // fork process (error check)
+            // fork process
             pid_t childPID = fork();
             if (childPID == -1) {
                 printError();
@@ -179,5 +180,30 @@ int main(int argc, char* argv[])
         }
     }
 
-    return 0;
+    return true;
+}
+
+int main(int argc, char* argv[])
+{
+    if (argc > 2) {
+        printError();
+        return 1;
+    }
+
+    // Check if batch mode (default is interactive)
+    if (argc > 1) {
+        std::ifstream inFile;
+        inFile.open(argv[1]);
+
+        if (!inFile) {
+            printError();
+            return 1;
+        }
+
+        // Run shell in batch mode
+        return runShell(inFile, false) ? 0 : 1;
+    }
+
+    // Run shell in interactive mode
+    return runShell(std::cin, true) ? 0 : 1;
 }
