@@ -1,0 +1,45 @@
+Problem: execute a series of instructions atomically (use locks)
+
+Where do locks go?
+  - around the critical section
+
+What problmem does it solve?
+  - any critical section executes as if it were a single atomic instruction
+  - the programmer can guarantee that no more than a single thread can ever be active within the critical section (code) at a time
+
+What does it mean to execute atomically?
+  - no other thread can see the intermediate state
+
+What is a critical section?
+  - a section of code that accesses shared data and must not be executed by more than one thread at a
+
+- use multiple locks in a program when you want to protect different pieces of data independently. This fine-grained locking allows multiple threads to work concurrently, improving performance by reducing unnecessary blocking. The key is ensuring the locks protect independent resources and that you avoid common pitfalls like deadlocks.
+
+- spin waiting: a thread repeatedly checks if a condition is true, consuming CPU resources and potentially causing performance issues (DO NOT USE SPIN WAITING).
+
+- spin lock: a lock that uses busy-waiting (spin waiting) to acquire the lock, which can lead to performance issues.
+  - simplest type of lock
+
+- spin lock mechanisim: 
+  - a thread tries to acquire the lock by repeatedly checking if the lock is free (unlocked).
+  - if the lock is free, the thread sets it to locked and proceeds.
+  - if the lock is already locked, the thread keeps checking in a loop until it can acquire the lock.
+
+Does spin lock provide these guarantees?
+  - correctness: yes - it ensures that only one thread can enter the critical section at a time.
+  - fairness: no - it can lead to starvation if a thread is continuously trying to acquire the lock.
+  - performance: no - it can waste CPU resources due to busy-waiting. (works well for short critical sections on multi-core systems)
+
+Using these instructions to implement a simple spin lock:
+  - test-and-set
+  - compare-and-swap
+
+Test-and-set instruction:
+  - a lock that uses an atomic operation to acquire the lock
+
+Compare-and-swap instruction:
+  - a lock that uses an atomic operation to acquire the lock
+  - it compares the current value of the lock with a known value and, if they are equal, swaps the lock's value with a new value (locked).
+  - if the swap is successful, the thread acquires the lock; otherwise, it retries.
+
+Left off at 28.10 Load-Linked and Store-Conditional
