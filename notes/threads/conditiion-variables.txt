@@ -1,0 +1,24 @@
+Problem: Way to put the parent to sleep until the condition we are waiting for is true
+
+Solution: Condition Variables
+- condition variables are synchronization primitives that allow threads to wait for certain conditions to be met before proceeding.
+- is an explicit queue that threads put themselves on when some state of execution is not desired; some other thread, when it changes said state, can wake one (or more) of the waiting threads.
+
+- pthread_cond_t cond; // initialize condition variable (cond is the condition variable)
+- pthread_cond_wait() // atomically releases the lock and puts the thread to sleep (assumes the lock is held)
+- pthread_cond_signal() // when a thread has changed the state, it can wake up one waiting thread
+
+- wait() - atomically releases the lock and puts the thread to sleep
+- when the thread is woken up, it reacquires the lock before returning from wait()
+
+- HOLD the lock when calling signal() or wait() when using condition variables
+- Mesa semantics: always use while loops with condition variables to avoid spurious wakeups and ensure the condition is still true when the thread wakes up.
+
+Producer/Consumer Problem
+- a classic synchronization problem where one or more producer threads produce data and one or more consumer threads consume that data.
+- ex: multi-threaded web server where one thread handles incoming requests (producer) and puts HTTP request into a work queue (bounded buffer) and another thread processes those requests (consumer).
+- a consumer should not wake other consumers, only producers, and vice versa.
+
+Problem Sovled:
+- allow threads to sleep when some program state is not desired
+- CVs enable us to nearly solve producer/consumer problem
