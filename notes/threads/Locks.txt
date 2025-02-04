@@ -42,4 +42,18 @@ Compare-and-swap instruction:
   - it compares the current value of the lock with a known value and, if they are equal, swaps the lock's value with a new value (locked).
   - if the swap is successful, the thread acquires the lock; otherwise, it retries.
 
-Left off at 28.10 Load-Linked and Store-Conditional
+**Left off at 28.10 Load-Linked and Store-Conditional**
+
+Lock with Test and set and yield:
+  - using yield() to give up the CPU to allow other threads to run (instead of spin waiting)
+    - yield() is a system call moves the caller from the running state to the ready state, allowing other threads to running.
+    - yielding thread essential deschedules itself
+  - this can improve performance by reducing CPU usage and allowing other threads to make progress.
+  - however, it can also lead to increased context switching and reduced performance if not used carefully.
+
+Using Queues: Sleeping instead of Spinning
+  - previous approaches leave too much chance. The scheduler determines when a thread can run (bad idea).
+  - park() and unpark() methods
+    - park(): puts the thread to sleep until it is woken up by another thread.
+    - unpark(): wakes up a sleeping thread, allowing it to continue execution.
+
