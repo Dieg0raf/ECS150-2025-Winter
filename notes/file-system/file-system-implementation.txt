@@ -1,0 +1,144 @@
+Aspects to think about file system implementation:
+  - Data structure:
+    - what types of on-disk structures are utilized by the file system to organize it's data and metadata?
+  - Access methods:
+    - How does it map the calls made by a process, such as open, read, write, and close, to the on-disk structures?
+
+Mental Model questions about File Systems you should evntually be able to answer:
+  - What on-disk structures store the file system's data and metadata?
+  - What happens when a process opens a file?
+  - Which on-disk structures are accessed during a read or write?
+  
+Very Simple File System (vsfs) Implementation
+- divide the disk into blocks(D) (4KB for example)
+- disk partition where we're building the file system is simple:
+  - a series of blocks
+  - each block is a fixed size (4KB)
+  - blocks are addressed from 0 to N-1, in a partition of size N 4-KB blocks
+
+  - region of the disk for user data is the data region
+    - reserve a fixed portion of the disk for this
+
+  - file system has to track information about each file
+    - metadata
+      - file name
+      - file size
+      - file type
+      - file permissions
+      - file location on disk (which blocks are used to store the file's data in the data region)
+
+  - To store this imformation, the file system uses a data structure called an inode (I)
+    - each file has an inode
+    - the inode contains all the metadata for that file
+    - the inode also contains pointers to the blocks in the data region that store the file's data
+
+  - the inodes are stored in a special area of the disk called the inode table
+    - reserve some space on the disk for the inode table as well
+    - simply holds an array of on-disk inodes
+    - typically not that big (128 or 256 bytes)
+    - building on a larger disk, coule simply allocate a larger inode table and thus allow for more files
+
+  - Allocation strucutres:
+    - the file system needs to keep track of which blocks in the data region are free and which are in use and also which inodes are free and which are in use
+    - bitmap (one for the data region (the data bitmap) and one for the inode table (the inode bitmap))
+      - each bit in the bitmap corresponds to a block in the data region or an inode in the inode table
+      - if the bit is set to 1, the block or inode is in use
+      - if the bit is set to 0, the block or inode is free
+    - each bitmap is allocated into a their own block
+
+  - Superblock
+    - the file system needs to keep track of some information about itself
+      - size of the data region
+      - size of the inode table
+      - size of the bitmaps
+      - number of inodes in use
+      - number of blocks in use
+    - this information is stored in a special block called the superblock
+    - the superblock is typically stored at the beginning of the disk partition
+  - Also includes a magic number
+    - a unique number that identifies the file system type
+    - used to verify that the file system is valid and not corrupted
+    
+  - when mounting a file system, the OS will read the Superblock first
+    - intializes the various parameters of the file system
+    - then attach the volume to the file system tree
+
+The inode (short of index node):
+  - on-disk structure that contains all the metadata for a given file
+    - length
+    - permissions
+    - and the location of its constituent blocks in the data region
+  - referred to by a number (called the i-number)
+  
+  - given an i-number, you should directly be able to calculate where on the disk the corresponding inode is located
+  - multiple inodes can be stored in a single block
+    - the inode table is simply an array of inodes
+    - the i-number is the index into this array
+  - the file system must compute which sector to read to fetch the inode
+    - the inode table is stored in a fixed location on the disk
+    - the i-number is used to calculate the offset into the inode table
+      - i-number * size of an inode = offset into the inode table
+      - offset / size of a block = block number
+      - offset % size of a block = offset within that block
+    
+  - To support bigger files, inode uses indirect pointer:
+    - a pointer that points to a block that contains more pointers, each of which point to user data
+
+Directory Organization:
+- contains a list of (entry name, inode number) pairs
+- each file or directory in a given directory, there is a string and a number in the data block(s)
+- file system treat directory as a special type of file
+- directory has an inode, somehwere in the inode table marked as "directory" intead of "regular file"
+- has data blocks pointed to by the inode, these data blocks live in the data block region
+
+Free Space Management (keep track of which inodes and data blocks are free, and which are not) :
+- when we create a file, we will have to allocate an inode for that file. The file system will thus search through the bitmap for an inode that is free, and allocate it to the file
+- the file system will have to mark the inode as used (with a 1) and eventually update the on-disk bitmap with the correct information. 
+
+Reading A File From Disk:
+- When trying to open a file (open system call):
+  - the file system must traverse the pathname and thus locate the desired inode.
+  - traversal begin at the root directory (the top of the file system tree)
+  - FS will read from disk the inode for the root directory
+  - to find an inode, we must know its i-number (INODE NUMBER 2 in most UNIX file systems)
+  - Once we have the inode for the root directory, the FS can look inside it to find pointers to data blocks, which contain the contents of the root directory
+  - FS will use these on-disk pointers to read through the directory data blocks
+  - once it finds the entry for the desired file, it will also find the inode number for that file/directory
+  - if directory is found, it will do the traversal again to find the inode for the file
+  - then read the file to find inode into memory
+  - FS then does a final permissions check, allocates a file descriptor for this process in the per-process open-file table, and returns it to the user
+
+- When trying to read from a file (read system call):
+  - read the first block of the file, consulting the inode to find the locatoin of such a block
+  - Afterwards, reading each block requires the file system to first consult the
+inode, then read the block, and then update the inode’s last-accessed-time field with a write. 
+  - update inode metadata (e.g., last access time)
+  - update file structure in open-file table (e.g., file offset)
+  - Also note that the amount of I/O generated by the open is proportional to the length of the pathname. (e.g., path/to/file/file.txt) 
+  - For each additional directory in the path, we have to read its inode as well as its data. 
+  - Making this worse would be the presence of large directories; here, we only have to read one block to get the contents of a directory, whereas with a large directory, we might have to read many data blocks to find the desired entry.
+
+Writed A File To Disk:
+- When trying to write to a file (write system call):
+  - file must be opened first (as described above)
+  - writing to the file may also allocate a block(s)
+  - each write has to write data to disk, but also has to first decide which block to allocate to the file
+  - Each write to a file logically generates five I/Os:
+    - read the data bitmap to find a free block
+    - write the bitmap (to reflect its new state to disk)
+    - two more to read and then write the inode (which is updated with the new block's location)
+    - write the actual block itself
+  - allocate an inode for the file
+
+Facts:
+- Unlike RAM (which is byte addressable), disks operate in sectors
+  - a sector is the smallest addressable unit on a disk
+  - typically 512 bytes or 4KB
+  - Cannot directly access a single byte on a disk; instead, you have to read or write an entire sector
+
+- Think of sectors as the smallest physical storage unit on the disk, wherease blocks are a logical structure used by the file system
+- A disk is divied into sectors
+- The file system works with blocks (e.g., 1024, 2048, or 4096 bytes)
+- Each block consists of mutiple sectors (e.g., a 1024-byte block has 2 sectors if each sector is 512 bytes)
+
+- Key idea: whenever the file system reads or writes data, the disk actually reads/writes sectors internally
