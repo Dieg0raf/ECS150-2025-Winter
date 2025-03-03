@@ -53,12 +53,18 @@ bool isValidDirectoryPath(const string& path, vector<string>& pathComponents)
         }
     }
 
+    // split paths & check for root directory
     pathComponents = splitPath(path);
-    if (pathComponents.empty()) { // check for root directory
+    if (pathComponents.empty()) {
         return true;
     }
 
     return true;
+}
+
+void printError()
+{
+    cerr << "Directory not found" << endl;
 }
 
 // Use this function with std::sort for directory entries
@@ -83,14 +89,109 @@ int main(int argc, char* argv[])
 
     vector<string> pathComponents;
     if (!isValidDirectoryPath(directory, pathComponents)) {
-        cerr << "Directory not found" << endl;
+        printError();
         delete fileSystem;
         delete disk;
         return 1;
     }
 
-    for (size_t i = 0; i < pathComponents.size(); i++) {
-        cout << "  [" << i << "]: " << pathComponents[i] << endl;
+    if (pathComponents.empty()) {
+        inode_t inode;
+        if (fileSystem->stat(0, &inode) != 0) {
+            return -EINVALIDINODE;
+        }
+
+        if (inode.type != UFS_DIRECTORY) {
+            return -EINVALIDINODE;
+        }
+
+        // Read in raw data
+        size_t dirSize = inode.size;
+        char buffer[dirSize];
+        if (fileSystem->read(0, buffer, dirSize) == 0) {
+            return -EINVALIDINODE;
+        }
+
+        // Iterate through directory entires
+        vector<dir_ent_t> dirEntries;
+        size_t amountOfEntiresToRead = dirSize / sizeof(dir_ent_t);
+        for (int j = 0; j < amountOfEntiresToRead; j++) {
+            dir_ent_t dirEntry;
+            memcpy(&dirEntry, buffer + (j * sizeof(dir_ent_t)), sizeof(dir_ent_t));
+            dirEntries.push_back(dirEntry);
+            // cout << "name: " << dirEntry.name << endl;
+            // cout << "inum: " << dirEntry.inum << endl;
+        }
+
+        // After you've collected all directory entries in the vector:
+        sort(dirEntries.begin(), dirEntries.end(), compareByName);
+
+        // Then display the sorted entries
+        for (int k = 0; k < dirEntries.size(); k++) {
+            cout << dirEntries[k].inum << "\t" << dirEntries[k].name << endl;
+        }
+
+        return 0;
+    }
+
+    size_t currentParentNode = 0;
+    size_t firstInodeNum = fileSystem->lookup(0, pathComponents[0]);
+    if (firstInodeNum == -EINVALIDINODE || firstInodeNum == -ENOTFOUND) {
+        printError();
+        return 1;
+    }
+    currentParentNode = firstInodeNum;
+
+    for (size_t i = 1; i < pathComponents.size(); i++) {
+        size_t inode_num = fileSystem->lookup(currentParentNode, pathComponents[i]);
+        if (inode_num == -EINVALIDINODE || inode_num == -ENOTFOUND) {
+            printError();
+            return 1;
+        }
+        currentParentNode = inode_num;
+    }
+
+    inode_t inode;
+    if (fileSystem->stat(currentParentNode, &inode) != 0) {
+        return -EINVALIDINODE;
+    }
+
+    // Check if it's a file or directory
+    if (inode.type == UFS_REGULAR_FILE) {
+        // For files, just print the file information
+        // Get the file name from the last path component
+        string fileName = pathComponents.back();
+        cout << currentParentNode << "\t" << fileName << endl;
+
+        delete fileSystem;
+        delete disk;
+        return 0;
+    }
+
+    // Read in raw data
+    size_t dirSize = inode.size;
+    char buffer[dirSize];
+    if (fileSystem->read(currentParentNode, buffer, dirSize) == 0) {
+        return -EINVALIDINODE;
+    }
+
+    // Iterate through directory entires
+    vector<dir_ent_t> dirEntries;
+    size_t amountOfEntiresToRead = dirSize / sizeof(dir_ent_t);
+    for (int j = 0; j < amountOfEntiresToRead; j++) {
+        dir_ent_t dirEntry;
+        memcpy(&dirEntry, buffer + (j * sizeof(dir_ent_t)), sizeof(dir_ent_t));
+        dirEntries.push_back(dirEntry);
+        // cout << "name: " << dirEntry.name << endl;
+        // cout << "inum: " << dirEntry.inum << endl;
+    }
+
+    // After you've collected all directory entries in the vector:
+    sort(dirEntries.begin(), dirEntries.end(), compareByName);
+
+    // Then display the sorted entries
+    for (int k = 0; k < dirEntries.size(); k++) {
+        cout << dirEntries[k].inum << "\t" << dirEntries[k].name << endl;
     }
 
     delete fileSystem;
@@ -98,3 +199,4 @@ int main(int argc, char* argv[])
 
     return 0;
 }
+

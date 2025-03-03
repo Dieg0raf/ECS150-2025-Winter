@@ -75,22 +75,128 @@ void LocalFileSystem::writeInodeRegion(super_t* super, inode_t* inodes)
 {
 }
 
+/**
+ * Lookup an inode.
+ *
+ * Takes the parent inode number (which should be the inode number
+ * of a directory) and looks up the entry name in it. The inode
+ * number of name is returned.
+ *
+ * Success: return inode number of name
+ * Failure: return -ENOTFOUND, -EINVALIDINODE.
+ * Failure modes: invalid parentInodeNumber, name does not exist.
+ */
 int LocalFileSystem::lookup(int parentInodeNumber, string name)
 {
-    return 0;
+    inode_t parentInode;
+    if (this->stat(parentInodeNumber, &parentInode) != 0) {
+        return -EINVALIDINODE;
+    }
+
+    if (parentInode.type != UFS_DIRECTORY) {
+        return -EINVALIDINODE;
+    }
+
+    // Read in raw data
+    size_t dirSize = parentInode.size;
+    char buffer[dirSize];
+    if (this->read(parentInodeNumber, buffer, dirSize) == 0) {
+        return -EINVALIDINODE;
+    }
+
+    // Iterate through directory entires
+    size_t amountOfEntiresToRead = dirSize / sizeof(dir_ent_t);
+    for (int j = 0; j < amountOfEntiresToRead; j++) {
+        dir_ent_t dirEntry;
+        memcpy(&dirEntry, buffer + (j * sizeof(dir_ent_t)), sizeof(dir_ent_t));
+        if (dirEntry.name == name) {
+            return dirEntry.inum;
+        }
+    }
+
+    return -ENOTFOUND;
 }
 
+/**
+ * Read an inode.
+ *
+ * Given an inodeNumber this function will fill in the `inode` struct with
+ * the type of the entry and the size of the data, in bytes, and direct blocks.
+ *
+ * Success: return 0
+ * Failure: return -EINVALIDINODE
+ * Failure modes: invalid inodeNumber
+ */
 int LocalFileSystem::stat(int inodeNumber, inode_t* inode)
 {
+    super_t super;
+    this->readSuperBlock(&super);
+
+    // Validate inode number
+    size_t amountOfInodes = super.num_inodes;
+    if (inodeNumber < 0 || inodeNumber >= amountOfInodes) {
+        return -EINVALIDINODE;
+    }
+
+    // Calculation inode offset & block offset
+    size_t inodes_per_block = UFS_BLOCK_SIZE / sizeof(inode_t);
+    size_t block_offset = inodeNumber / inodes_per_block;
+    size_t inode_block = super.inode_region_addr + block_offset;
+    size_t inode_offset_in_block = inodeNumber % inodes_per_block;
+
+    // Copy bytes from disk block to buffer & then into inode stuct
+    char buffer[UFS_BLOCK_SIZE];
+    this->disk->readBlock(inode_block, buffer);
+    memcpy(inode, buffer + (inode_offset_in_block * sizeof(inode_t)), sizeof(inode_t));
+
     return 0;
 }
 
+/**
+ * Read the contents of a file or directory.
+ *
+ * Reads up to `size` bytes of data into the buffer from file specified by
+ * inodeNumber. The routine should work for either a file or directory;
+ * directories should return data in the format specified by dir_ent_t.
+ *
+ * Success: number of bytes read
+ * Failure: -EINVALIDINODE, -EINVALIDSIZE.
+ * Failure modes: invalid inodeNumber, invalid size.
+ */
 int LocalFileSystem::read(int inodeNumber, void* buffer, int size)
 {
     // always read data starting from the beginning of the file.
     // if size IS LESS than the size of object to read, then return only those bytes.
     // if size IS GREATER than the size of object to read, then return the bytes in the object.
-    return 0;
+
+    // (1) Find the inode
+    // (2) Read the raw bytes from the direct blocks
+    // (3) Copy those bytes to the provided buffer
+    // (4) Return how many bytes were read
+
+    // Find the inode
+    inode_t inode;
+    if (this->stat(inodeNumber, &inode) != 0) {
+        return -EINVALIDINODE;
+    }
+
+    size_t blocksNeeded = ceil(static_cast<double>(inode.size) / UFS_BLOCK_SIZE);
+    size_t bytesToRead = min(static_cast<size_t>(size), static_cast<size_t>(inode.size));
+    size_t bytesRead = 0;
+
+    // Read the raw bytes from the direct blocks
+    for (size_t i = 0; i < blocksNeeded; i++) {
+        char blockBuffer[UFS_BLOCK_SIZE];
+        this->disk->readBlock(inode.direct[i], blockBuffer);
+
+        // Calculate where in the destination buffer this block goes
+        size_t destOffset = i * UFS_BLOCK_SIZE; // Offset in destination buffer to start writing from
+        size_t bytesToCopy = min(static_cast<size_t>(UFS_BLOCK_SIZE), static_cast<size_t>(bytesToRead - bytesRead));
+        memcpy((char*)buffer + (destOffset), blockBuffer, bytesToCopy);
+        bytesRead += bytesToCopy;
+    }
+
+    return bytesRead;
 }
 
 // **Create - Write - Unlink**
@@ -117,3 +223,4 @@ int LocalFileSystem::unlink(int parentInodeNumber, string name)
 {
     return 0;
 }
+
