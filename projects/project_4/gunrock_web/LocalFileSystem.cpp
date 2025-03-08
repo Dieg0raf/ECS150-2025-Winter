@@ -49,6 +49,14 @@ void setBit(unsigned char* bitmap, const int position)
     bitmap[byteIndex] |= (1 << bitOffset);
 }
 
+// Set a bit at position
+void clearBit(unsigned char* bitmap, const int position)
+{
+    int byteIndex = position / 8;
+    int bitOffset = position % 8;
+    bitmap[byteIndex] &= ~(1 << bitOffset);
+}
+
 static int allocateNewInode(LocalFileSystem* const fs, super_t* super, int type)
 {
     // Process Inode bitmap
@@ -81,6 +89,41 @@ static int allocateNewInode(LocalFileSystem* const fs, super_t* super, int type)
     delete[] inodeBitmap;
 
     return freeInodeIndex;
+}
+
+static int deAllocateDataBlock(LocalFileSystem* const fs, super_t* const super, int dataBlock)
+{
+    // Process Data bitmap
+    size_t dataBitmapBytes = static_cast<int>(ceil(super->num_data / 8));
+    unsigned char* dataBitmap = new unsigned char[dataBitmapBytes];
+    fs->readDataBitmap(super, dataBitmap);
+
+    int dataBlockToFree = dataBlock - super->data_region_addr;
+    // cout << "Block to to free: " << dataBlockToFree << endl;
+
+    // cout << "Data bit map BEFORE clearing" << endl;
+    // for (size_t i = 0; i < dataBitmapBytes; i++) {
+    //     bitset<8> bits(dataBitmap[i]);
+    //     cout << "(" << (i * 8) + 7 << "-" << i * 8 << ")" << bits << endl;
+    // }
+
+    clearBit(dataBitmap, dataBlockToFree); // clear bit in bitmap
+
+    // cout << "Data bit map AFTER clearing" << endl;
+    // for (size_t i = 0; i < dataBitmapBytes; i++) {
+    //     bitset<8> bits(dataBitmap[i]);
+    //     cout << "(" << (i * 8) + 7 << "-" << i * 8 << ")" << bits << endl;
+    // }
+
+    fs->writeDataBitmap(super, dataBitmap); // Write bitmap to disk
+
+    // Clear the block with zeros
+    char emptyBlock[UFS_BLOCK_SIZE] = { 0 };
+    fs->disk->writeBlock(dataBlock, emptyBlock);
+
+    delete[] dataBitmap;
+
+    return 0;
 }
 
 static int allocateDataBlock(LocalFileSystem* const fs, super_t* const super)
@@ -139,15 +182,8 @@ static int validateCreateParameters(LocalFileSystem* const fs, super_t* const su
 
     // Validate type
     if (type != UFS_DIRECTORY && type != UFS_REGULAR_FILE) {
-        // cout << "Invalid file type" << endl;
         return -EINVALIDTYPE;
     }
-
-    // // Check file name size
-    // if (name.size() >= DIR_ENT_NAME_SIZE) {
-    //     // cout << "Invalid name size" << endl;
-    //     return -EINVALIDNAME;
-    // }
 
     // Check if name already exists in parent directory
     int existingInodeNum = fs->lookup(parentInodeNumber, name);
@@ -155,14 +191,11 @@ static int validateCreateParameters(LocalFileSystem* const fs, super_t* const su
         inode_t existingInode;
         fs->stat(existingInodeNum, &existingInode);
         if (existingInode.type == type) {
-            // cout << "Name already exists and is of the same type";
             return existingInodeNum;
         }
-        // cout << "Name already exists and but different TYPE" << endl;
         return -EINVALIDTYPE;
     }
 
-    // cout << "Existing node: " << existingInodeNum << endl;
     if (existingInodeNum == -EINVALIDINODE) {
         return existingInodeNum;
     }
@@ -170,7 +203,7 @@ static int validateCreateParameters(LocalFileSystem* const fs, super_t* const su
     return 0; // All checks passed
 }
 
-static int writeDirectoryData(LocalFileSystem* const fs, super_t* const super, inode_t& parentInode, char* data, size_t dataSize, size_t oldSize)
+static int writeData(LocalFileSystem* const fs, super_t* const super, inode_t& parentInode, char* data, size_t dataSize, size_t oldSize)
 {
 
     size_t blocksNeeded = std::ceil(static_cast<double>(dataSize) / UFS_BLOCK_SIZE);
@@ -184,19 +217,42 @@ static int writeDirectoryData(LocalFileSystem* const fs, super_t* const super, i
             parentInode.direct[j] = -1;
     }
 
+    // DeAllocate blocks if needed
+    if (blocksNeeded < allocatedBlocks) {
+        // cout << "New File is smaller than before" << endl;
+        for (size_t i = blocksNeeded; i < allocatedBlocks; i++) {
+            // cout << "Deallocating data block" << endl;
+            int isFreeBlock = deAllocateDataBlock(fs, super, parentInode.direct[i]);
+            if (isFreeBlock != 0) {
+                return -1; // Error code from allocateDataBlock
+            }
+            parentInode.direct[i] = -1;
+        }
+    }
+
     // Allocate additional blocks if needed
     if (blocksNeeded > allocatedBlocks) {
-        // cout << "allocating a new block for parent Inode" << endl;
+        // cout << "New file is bigger than before" << endl;
+        int actualBlocksAllocated = allocatedBlocks; // keep track of allocated blocks (needed if allocating fails)
         for (size_t i = allocatedBlocks; i < blocksNeeded; i++) {
+            // cout << "Allocated data block" << endl;
             int newBlockNum = allocateDataBlock(fs, super);
-            // cout << "Return value from allocating a new block: " << newBlockNum << endl;
             if (newBlockNum < 0) {
-                return newBlockNum; // Error code from allocateDataBlock
+                blocksNeeded = actualBlocksAllocated; // No more disk space
+                break;
             }
-
-            // cout << "Allocating block: " << newBlockNum << endl;
             parentInode.direct[i] = newBlockNum;
+            actualBlocksAllocated++;
         }
+
+        // 0 blocks were allocated (no space for more)
+        if (actualBlocksAllocated == 0) {
+            return -ENOTENOUGHSPACE;
+        }
+    }
+
+    if (blocksNeeded > 0 && parentInode.direct[0] < 0) {
+        return -ENOTENOUGHSPACE;
     }
 
     // Write data to blocks
@@ -215,7 +271,7 @@ static int writeDirectoryData(LocalFileSystem* const fs, super_t* const super, i
         bytesWritten += bytesToCopy;
     }
 
-    return 0;
+    return bytesWritten;
 }
 
 static int updateParentDirectory(LocalFileSystem* const fs, super_t* const super, vector<inode_t>& inodes, int parentInodeNumber, int newInodeNum, string name)
@@ -270,10 +326,14 @@ static int updateParentDirectory(LocalFileSystem* const fs, super_t* const super
     }
 
     // Write the directory data to disk
-    int result = writeDirectoryData(fs, super, parentInode, newDirBuffer, newDirSize, oldParentDirSize);
+    int bytesWritten = writeData(fs, super, parentInode, newDirBuffer, newDirSize, oldParentDirSize);
+    if (bytesWritten < 0) {
+        delete[] newDirBuffer;
+        return bytesWritten;
+    }
 
     delete[] newDirBuffer;
-    return result;
+    return bytesWritten;
 }
 
 LocalFileSystem::LocalFileSystem(Disk* disk)
@@ -543,13 +603,11 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name)
     super_t super;
     this->readSuperBlock(&super);
 
-    // cout << "Going into the validation" << endl;
     // Validate parameters first
     int validationResult = validateCreateParameters(this, &super, parentInodeNumber, type, name);
     if (validationResult != 0) {
         return validationResult;
     }
-    // cout << "made it passed the validation" << endl;
 
     int newInodeNum = allocateNewInode(this, &super, type);
     if (newInodeNum < 0) {
@@ -578,44 +636,24 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name)
         entries[1].inum = parentInodeNumber;
         strcpy(entries[1].name, "..");
 
-        // // allocate data block for new directory
-        // int dataBlockNum = allocateDataBlock(this, &super);
-        // if (dataBlockNum < 0) {
-        //     this->disk->rollback();
-        //     return dataBlockNum;
-        // }
-
-        // inodes[newInodeNum].direct[0] = dataBlockNum;
-        // for (int j = 1; j < DIRECT_PTRS; j++)
-        //     inodes[newInodeNum].direct[j] = -1;
-
-        // cout << "Parent inode going through DIR path: " << newInodeNum << endl;
-        int updateResult = writeDirectoryData(this, &super, inodes[newInodeNum], (char*)entries, newDirSize, 0);
+        // allocate data block for new directory
+        int bytesWritten = writeData(this, &super, inodes[newInodeNum], (char*)entries, newDirSize, 0);
         delete[] entries;
-        if (updateResult < 0) {
+        if (bytesWritten < 0) {
             this->disk->rollback();
-            return updateResult;
+            return bytesWritten;
         }
-
-        // // write directory data to disk block
-        // char buffer[UFS_BLOCK_SIZE];
-        // memset(buffer, 0, UFS_BLOCK_SIZE);
-        // memcpy(buffer, entries, sizeof(dir_ent_t) * 2);
-        // this->disk->writeBlock(dataBlockNum, buffer);
     }
 
     // update parent directory (size and data)
-    // cout << "Parent inode going through non-dir path: " << parentInodeNumber << endl;
-    int updateResult = updateParentDirectory(this, &super, inodes, parentInodeNumber, newInodeNum, name);
-    if (updateResult < 0) {
+    int bytesWritten = updateParentDirectory(this, &super, inodes, parentInodeNumber, newInodeNum, name);
+    if (bytesWritten < 0) {
         this->disk->rollback();
-        return updateResult;
+        return bytesWritten;
     }
 
-    // write inode new inode and parent inode to disk
-    this->writeInodeRegion(&super, inodes.data());
-
     // COMMIT
+    this->writeInodeRegion(&super, inodes.data());
     this->disk->commit();
 
     return newInodeNum;
@@ -637,8 +675,48 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name)
  */
 int LocalFileSystem::write(int inodeNumber, const void* buffer, int size)
 {
-    return 0;
-}
+    // validate size
+    if (size < 0 || size >= DIRECT_PTRS * UFS_BLOCK_SIZE) {
+        return -EINVALIDSIZE;
+    }
 
-int LocalFileSystem::unlink(int parentInodeNumber, string name) { return 0; }
+    // BEGIN TRANSACTION
+    this->disk->beginTransaction();
+
+    // find inode
+    inode_t inode;
+    if (this->stat(inodeNumber, &inode) != 0) {
+        this->disk->rollback();
+        return -EINVALIDINODE;
+    }
+
+    if (inode.type != UFS_REGULAR_FILE) {
+        this->disk->rollback();
+        return -EINVALIDTYPE;
+    }
+
+    super_t super;
+    this->readSuperBlock(&super);
+
+    // write buffer data to blocks
+    size_t oldSize = inode.size;
+    int bytesWritten = writeData(this, &super, inode, (char*)buffer, size, oldSize);
+    if (bytesWritten < 0) {
+        this->disk->rollback();
+        return bytesWritten;
+    }
+
+    // cout << "Bytes written from write data: " << bytesWritten << endl;
+
+    // update inode in disk (read and write inode region)
+    inode.size = bytesWritten;
+    vector<inode_t> inodes(super.num_inodes);
+    this->readInodeRegion(&super, inodes.data());
+    inodes[inodeNumber] = inode;
+    this->writeInodeRegion(&super, inodes.data());
+
+    // COMMIT TRANSACTION
+    this->disk->commit();
+    return bytesWritten;
+}
 
