@@ -14,16 +14,15 @@
 
 using namespace std;
 
-void printError(string srcFile)
+void printError()
 {
-    cout << "Could not write to " << srcFile << endl;
+    cerr << "Could not write to dst_file" << endl;
 }
 
 int openFile(string srcFile)
 {
     int fd = open(srcFile.c_str(), O_RDONLY);
     if (fd == -1) {
-        cerr << "Error opening file " << srcFile << endl;
         return -1;
     }
 
@@ -50,7 +49,6 @@ int startCopy(LocalFileSystem* const fileSystem, const int dstInode, string srcF
     // get size of file
     struct stat st;
     if (stat(srcFile.c_str(), &st) != 0) {
-        cerr << "Error getting file size" << endl;
         return -1;
     }
 
@@ -58,19 +56,18 @@ int startCopy(LocalFileSystem* const fileSystem, const int dstInode, string srcF
     ssize_t fileSize = st.st_size;
     char* buffer = new char[fileSize];
     if (read(fd, buffer, fileSize) != fileSize) {
-        cerr << "Error reading file" << endl;
         delete[] buffer;
         return -1;
     }
 
     // write buffer to disk
     int bytesWritten = fileSystem->write(dstInode, buffer, fileSize);
+    delete[] buffer;
+
     if (bytesWritten < 0) {
-        delete[] buffer;
         return -1;
     }
 
-    delete[] buffer;
     return bytesWritten;
 }
 
@@ -88,25 +85,26 @@ int main(int argc, char* argv[])
     LocalFileSystem* fileSystem = new LocalFileSystem(disk);
     string srcFile = string(argv[2]);
 
-    // validate inode number
-    int dstInode = validateInode(argv);
-    if (dstInode < 0) {
-        printError(srcFile);
-        delete fileSystem;
-        delete disk;
-    }
-
     // open file
     int fd = openFile(srcFile);
     if (fd == -1) {
+        cerr << "Error opening file " << srcFile << endl;
+        return 1;
+    }
+
+    // validate inode number
+    int dstInode = validateInode(argv);
+    if (dstInode < 0) {
+        printError();
+        delete fileSystem;
+        delete disk;
         return 1;
     }
 
     // Run copy of file
     int returnCode = 0;
-    int bytesWritten = startCopy(fileSystem, dstInode, srcFile, fd);
-    if (bytesWritten < 0) {
-        printError(srcFile);
+    if (startCopy(fileSystem, dstInode, srcFile, fd) < 0) {
+        printError();
         returnCode = 1;
     }
 
