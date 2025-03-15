@@ -20,7 +20,8 @@ enum PathNavigationResult {
   SUCCESS = 0,
   NOT_FOUND = -1,
   BAD_REQUEST = -2,
-  INSUFFICIENT_STORAGE = -3
+  INSUFFICIENT_STORAGE = -3,
+  INTERNAL_ERROR = -4
 };
 
 // Helper functions
@@ -33,15 +34,20 @@ void formatDirectoryEntries(const vector<dir_ent_t> &entries,
                             std::stringstream &stringStream);
 
 // Content handling
-int handleFileContent(vector<string> &pathComponents, stringstream &output,
-                      size_t targetInode);
+int handleFileContent(LocalFileSystem *const fs, vector<string> &pathComponents,
+                      stringstream &output, const inode_t &targetInode,
+                      const size_t targetInodeNumber);
+int handleDirectoryContent(LocalFileSystem *const fs,
+                           const inode_t &targetInode,
+                           const size_t targetInodeNumber,
+                           stringstream &output);
 
 // Main filesystem operations
-int navigateToDirectory(LocalFileSystem *const fileSystem,
+int navigateToDirectory(LocalFileSystem *const fs,
                         const vector<string> &pathComponents,
                         size_t &targetInode);
-int getPathContents(LocalFileSystem *const fileSystem,
-                    vector<string> &pathComponents, stringstream &output);
+int getPathContents(LocalFileSystem *const fs, vector<string> &pathComponents,
+                    stringstream &output);
 
 DistributedFileSystemService::DistributedFileSystemService(string diskFile)
     : HttpService("/ds3/") {
@@ -68,7 +74,7 @@ void DistributedFileSystemService::get(HTTPRequest *request,
     response->setBody(stringStream.str());
   } else {
     response->setStatus(500);
-    response->setBody("Internal Error");
+    response->setBody("Internal Server Error");
   }
 }
 
@@ -101,13 +107,13 @@ int validatePathComponents(const vector<string> &pathComponents,
   return SUCCESS;
 }
 
-vector<dir_ent_t> getDirectoryEntries(LocalFileSystem *const fileSystem,
+vector<dir_ent_t> getDirectoryEntries(LocalFileSystem *const fs,
                                       const inode_t *inode, size_t inodeNum) {
   // Read directory data
   vector<dir_ent_t> dirEntries;
   size_t dirSize = inode->size;
   unique_ptr<char[]> buffer(new char[dirSize]);
-  if (fileSystem->read(inodeNum, buffer.get(), dirSize) == 0) {
+  if (fs->read(inodeNum, buffer.get(), dirSize) == 0) {
     return dirEntries;
   }
 
@@ -127,7 +133,7 @@ vector<dir_ent_t> getDirectoryEntries(LocalFileSystem *const fileSystem,
 }
 
 void formatDirectoryEntries(const vector<dir_ent_t> &entries,
-                            std::stringstream &stringStream) {
+                            stringstream &stringStream) {
   if (entries.empty()) {
     return;
   }
@@ -140,14 +146,30 @@ void formatDirectoryEntries(const vector<dir_ent_t> &entries,
   }
 }
 
-int handleFileContent(vector<string> &pathComponents, stringstream &output,
-                      size_t targetInode) {
-  string fileName = pathComponents.back();
-  output << targetInode << "\t" << fileName << endl;
+int handleFileContent(LocalFileSystem *const fs, vector<string> &pathComponents,
+                      stringstream &output, const size_t targetInodeSize,
+                      const size_t targetInodeNumber) {
+  // reads file contents from disk
+  unique_ptr<char[]> buffer(new char[targetInodeSize]);
+  int bytesRead = fs->read(targetInodeNumber, buffer.get(), targetInodeSize);
+  if (bytesRead < 0) {
+    return INTERNAL_ERROR;
+  }
+  output.write(buffer.get(), bytesRead); // fills up output string stream
   return SUCCESS;
 }
 
-int navigateToDirectory(LocalFileSystem *const fileSystem,
+int handleDirectoryContent(LocalFileSystem *const fs,
+                           const inode_t &targetInode,
+                           const size_t targetInodeNumber,
+                           stringstream &output) {
+  vector<dir_ent_t> entries =
+      getDirectoryEntries(fs, &targetInode, targetInodeNumber);
+  formatDirectoryEntries(entries, output); // fills up output string stream
+  return SUCCESS;
+}
+
+int navigateToDirectory(LocalFileSystem *const fs,
                         const vector<string> &pathComponents,
                         size_t &targetInode) {
   // Validate input (paths)
@@ -159,7 +181,7 @@ int navigateToDirectory(LocalFileSystem *const fileSystem,
   // Navigate through path (start after ds3)
   size_t currentInode = 0;
   for (size_t i = 1; i < pathComponents.size(); i++) {
-    int nextInode = fileSystem->lookup(currentInode, pathComponents[i]);
+    int nextInode = fs->lookup(currentInode, pathComponents[i]);
     if (nextInode == -EINVALIDINODE || nextInode == -ENOTFOUND) {
       return NOT_FOUND;
     }
@@ -170,28 +192,26 @@ int navigateToDirectory(LocalFileSystem *const fileSystem,
   return SUCCESS;
 }
 
-int getPathContents(LocalFileSystem *const fileSystem,
-                    vector<string> &pathComponents, stringstream &output) {
-  // Navigate to target directory
-  size_t targetInode;
-  int navResult = navigateToDirectory(fileSystem, pathComponents, targetInode);
+int getPathContents(LocalFileSystem *const fs, vector<string> &pathComponents,
+                    stringstream &output) {
+  // Navigate to target directory and get inode number
+  size_t targetInodeNumber;
+  int navResult = navigateToDirectory(fs, pathComponents, targetInodeNumber);
   if (navResult != SUCCESS) {
     return navResult;
   }
 
   // Get inode information for target
-  inode_t inode;
-  if (fileSystem->stat(targetInode, &inode) != 0) {
+  inode_t targetInode;
+  if (fs->stat(targetInodeNumber, &targetInode) != 0) {
     return BAD_REQUEST;
   }
 
   // Handle file and directory differently
-  if (inode.type == UFS_REGULAR_FILE) {
-    return handleFileContent(pathComponents, output, targetInode);
+  if (targetInode.type == UFS_REGULAR_FILE) {
+    return handleFileContent(fs, pathComponents, output, targetInode.size,
+                             targetInodeNumber);
   } else {
-    vector<dir_ent_t> entries =
-        getDirectoryEntries(fileSystem, &inode, targetInode);
-    formatDirectoryEntries(entries, output);
-    return SUCCESS;
+    return handleDirectoryContent(fs, targetInode, targetInodeNumber, output);
   }
 }
