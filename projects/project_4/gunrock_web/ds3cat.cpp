@@ -54,7 +54,7 @@ int printFileContents(LocalFileSystem* const fileSystem, const int inodeNumber)
     // reads file contents from disk
     size_t fileSize = inode.size;
     char buffer[fileSize];
-    if (fileSystem->read(inodeNumber, buffer, fileSize) == 0) {
+    if (fileSystem->read(inodeNumber, buffer, fileSize) < 0) {
         return 1;
     }
 

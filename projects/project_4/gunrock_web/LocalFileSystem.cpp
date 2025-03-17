@@ -606,7 +606,7 @@ int LocalFileSystem::unlink(int parentInodeNumber, std::string name)
         return -EINVALIDINODE;
     } else if (inodeToDelete == -ENOTFOUND) {
         this->disk->commit();
-        return 0;
+        return -ENOTFOUND;
     }
 
     super_t super;

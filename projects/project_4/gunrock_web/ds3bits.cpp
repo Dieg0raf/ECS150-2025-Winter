@@ -1,15 +1,15 @@
+#include "Disk.h"
+#include "LocalFileSystem.h"
+#include "ufs.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <string>
 
-#include "Disk.h"
-#include "LocalFileSystem.h"
-#include "ufs.h"
-
 using namespace std;
 
-void printSuperBlockInfo(super_t* super)
+void printSuperBlockInfo(super_t *super)
 {
     cout << "Super" << endl;
     cout << "inode_region_addr " << super->inode_region_addr << endl;
@@ -22,19 +22,20 @@ void printSuperBlockInfo(super_t* super)
     cout << endl;
 }
 
-void printBitMap(unsigned char* bitmap, int numBytes)
+void printBitMap(unsigned char *bitmap, int numBytes)
 {
-    for (int i = 0; i < numBytes; i++) {
+    for (int i = 0; i < numBytes; i++)
+    {
         cout << (unsigned int)bitmap[i] << " ";
     }
     cout << endl;
 }
 
-void processDataBitMap(super_t* super, LocalFileSystem* fileSystem)
+void processDataBitMap(super_t *super, LocalFileSystem *fileSystem)
 {
     // Process Data bit map
-    int dataBitmapBytes = static_cast<int>(ceil(super->num_data / 8));
-    unsigned char* dataBitmap = new unsigned char[dataBitmapBytes];
+    int dataBitmapBytes = static_cast<int>(ceil(super->num_data / 8.0));
+    unsigned char *dataBitmap = new unsigned char[dataBitmapBytes];
     fileSystem->readDataBitmap(super, dataBitmap);
 
     cout << "Data bitmap" << endl;
@@ -42,11 +43,11 @@ void processDataBitMap(super_t* super, LocalFileSystem* fileSystem)
     delete[] dataBitmap;
 }
 
-void processInodeBitMap(super_t* super, LocalFileSystem* fileSystem)
+void processInodeBitMap(super_t *super, LocalFileSystem *fileSystem)
 {
     // Process Inode bit map
-    int inodeBitmapBytes = static_cast<int>(ceil(super->num_inodes / 8));
-    unsigned char* inodeBitmap = new unsigned char[inodeBitmapBytes];
+    int inodeBitmapBytes = static_cast<int>(ceil(super->num_inodes / 8.0));
+    unsigned char *inodeBitmap = new unsigned char[inodeBitmapBytes];
     fileSystem->readInodeBitmap(super, inodeBitmap);
 
     cout << "Inode bitmap" << endl;
@@ -54,16 +55,17 @@ void processInodeBitMap(super_t* super, LocalFileSystem* fileSystem)
     delete[] inodeBitmap;
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
-    if (argc != 2) {
+    if (argc != 2)
+    {
         cerr << argv[0] << ": diskImageFile" << endl;
         return 1;
     }
 
     // Parse command line arguments
-    Disk* disk = new Disk(argv[1], UFS_BLOCK_SIZE);
-    LocalFileSystem* fileSystem = new LocalFileSystem(disk);
+    Disk *disk = new Disk(argv[1], UFS_BLOCK_SIZE);
+    LocalFileSystem *fileSystem = new LocalFileSystem(disk);
 
     // Read in super block
     super_t superBlock;
@@ -72,6 +74,7 @@ int main(int argc, char* argv[])
     // Process superblock info and bitmaps
     printSuperBlockInfo(&superBlock);
     processInodeBitMap(&superBlock, fileSystem);
+    cout << endl;
     processDataBitMap(&superBlock, fileSystem);
 
     delete fileSystem;
@@ -79,3 +82,4 @@ int main(int argc, char* argv[])
 
     return 0;
 }
+

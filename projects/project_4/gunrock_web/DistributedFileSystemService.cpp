@@ -20,20 +20,21 @@ enum FileSystemResult {
     SUCCESS = 0,
     NOT_FOUND = -1,
     BAD_REQUEST = -2,
-    INSUFFICIENT_STORAGE = -3,
     INTERNAL_ERROR = -4
 };
 
 // Helper functions
 bool compareByName(const dir_ent_t& a, const dir_ent_t& b);
 int validatePathComponents(const vector<string>& pathComponents, size_t& rootInode);
+int validateName(string fileName);
+void sendResponse(HTTPResponse* response, int rc, const string& successMessage);
 
 // Directory operations
 vector<dir_ent_t> getDirectoryEntries(LocalFileSystem* const fileSystem, const inode_t* inode, size_t inodeNum);
-void formatDirectoryEntries(const vector<dir_ent_t>& entries, std::stringstream& stringStream);
+int formatDirectoryEntries(LocalFileSystem* const fs, const vector<dir_ent_t>& entries, std::stringstream& stringStream);
 
 // Content handling
-int handleFileContent(LocalFileSystem* const fs, vector<string>& pathComponents, stringstream& output, const inode_t& targetInode, const size_t targetInodeNumber);
+int handleFileContent(LocalFileSystem* const fs, vector<string>& pathComponents, stringstream& output, const size_t targetInodeSize, const size_t targetInodeNumber);
 int handleDirectoryContent(LocalFileSystem* const fs, const inode_t& targetInode, const size_t targetInodeNumber, stringstream& output);
 
 // Main filesystem operations
@@ -41,6 +42,7 @@ int navigateToDirectory(LocalFileSystem* const fs, const vector<string>& pathCom
 int getPathContents(LocalFileSystem* const fs, vector<string>& pathComponents, stringstream& output);
 int ensurePathExists(LocalFileSystem* const fs, const vector<string>& pathComponents, size_t& targetInode);
 int createOrUpdateFile(LocalFileSystem* const fs, const vector<string>& pathComponents, const string& fileContent);
+int deleteEntry(LocalFileSystem* const fs, vector<string>& pathComponents);
 
 DistributedFileSystemService::DistributedFileSystemService(string diskFile)
     : HttpService("/ds3/")
@@ -50,12 +52,38 @@ DistributedFileSystemService::DistributedFileSystemService(string diskFile)
 
 void DistributedFileSystemService::get(HTTPRequest* request, HTTPResponse* response)
 {
-    // grab path
     vector<string> pathComponents = request->getPathComponents();
     stringstream stringStream;
-
     int rc = getPathContents(this->fileSystem, pathComponents, stringStream);
-    if (rc == NOT_FOUND) {
+    sendResponse(response, rc, stringStream.str());
+}
+
+void DistributedFileSystemService::put(HTTPRequest* request, HTTPResponse* response)
+{
+    vector<string> pathComponents = request->getPathComponents();
+    string fileContent = request->getBody();
+    int rc = createOrUpdateFile(this->fileSystem, pathComponents, fileContent);
+    sendResponse(response, rc, "File Successfully updated\n");
+}
+
+void DistributedFileSystemService::del(HTTPRequest* request, HTTPResponse* response)
+{
+    vector<string> pathComponents = request->getPathComponents();
+    int rc = deleteEntry(this->fileSystem, pathComponents);
+    sendResponse(response, rc, "Entry has been deleted\n");
+}
+
+bool compareByName(const dir_ent_t& a, const dir_ent_t& b)
+{
+    return std::strcmp(a.name, b.name) < 0;
+}
+
+void sendResponse(HTTPResponse* response, int rc, const string& successMessage)
+{
+    if (rc == SUCCESS) {
+        response->setStatus(200);
+        response->setBody(successMessage);
+    } else if (rc == NOT_FOUND) {
         response->setStatus(404);
         response->setBody("Not Found");
         return;
@@ -63,47 +91,10 @@ void DistributedFileSystemService::get(HTTPRequest* request, HTTPResponse* respo
         response->setStatus(400);
         response->setBody("Bad Request");
         return;
-    } else if (rc == SUCCESS) {
-        response->setStatus(200);
-        response->setBody(stringStream.str());
     } else {
         response->setStatus(500);
         response->setBody("Internal Server Error");
     }
-}
-
-void DistributedFileSystemService::put(HTTPRequest* request, HTTPResponse* response)
-{
-    vector<string> pathComponents = request->getPathComponents();
-    string fileContent = request->getBody();
-
-    int rc = createOrUpdateFile(this->fileSystem, pathComponents, fileContent);
-    if (rc == BAD_REQUEST) {
-        response->setStatus(400);
-        response->setBody("Bad Request");
-    } else if (rc == NOT_FOUND) {
-        response->setStatus(404);
-        response->setBody("Not Found");
-    } else if (rc == INTERNAL_ERROR) {
-        response->setStatus(500);
-        response->setBody("Internal Server Error");
-    } else if (rc == SUCCESS) {
-        response->setStatus(200);
-        response->setBody("File successfully written");
-    } else {
-        response->setStatus(500);
-        response->setBody("Unknown Error");
-    }
-}
-
-void DistributedFileSystemService::del(HTTPRequest* request, HTTPResponse* response)
-{
-    response->setBody("This is a response from the DEL");
-}
-
-bool compareByName(const dir_ent_t& a, const dir_ent_t& b)
-{
-    return std::strcmp(a.name, b.name) < 0;
 }
 
 int validatePathComponents(const vector<string>& pathComponents, size_t& rootInode)
@@ -145,17 +136,27 @@ vector<dir_ent_t> getDirectoryEntries(LocalFileSystem* const fs, const inode_t* 
     return dirEntries;
 }
 
-void formatDirectoryEntries(const vector<dir_ent_t>& entries, stringstream& stringStream)
+int formatDirectoryEntries(LocalFileSystem* const fs, const vector<dir_ent_t>& entries, stringstream& stringStream)
 {
     if (entries.empty()) {
-        return;
+        return SUCCESS;
     }
     for (size_t i = 0; i < entries.size(); i++) {
         if (strcmp(entries.at(i).name, ".") == 0 || strcmp(entries.at(i).name, "..") == 0) { // skip .. and . entries
             continue;
         }
+        inode_t inode;
+        int rc = fs->stat(entries.at(i).inum, &inode);
+        if (rc < 0) {
+            return rc;
+        }
+        if (inode.type == UFS_DIRECTORY) {
+            stringStream << entries[i].name << "/" << endl;
+            continue;
+        }
         stringStream << entries[i].name << endl;
     }
+    return SUCCESS;
 }
 
 int handleFileContent(LocalFileSystem* const fs, vector<string>& pathComponents, stringstream& output, const size_t targetInodeSize, const size_t targetInodeNumber)
@@ -173,7 +174,10 @@ int handleFileContent(LocalFileSystem* const fs, vector<string>& pathComponents,
 int handleDirectoryContent(LocalFileSystem* const fs, const inode_t& targetInode, const size_t targetInodeNumber, stringstream& output)
 {
     vector<dir_ent_t> entries = getDirectoryEntries(fs, &targetInode, targetInodeNumber);
-    formatDirectoryEntries(entries, output); // fills up output string stream
+    int rc = formatDirectoryEntries(fs, entries, output); // fills up output string stream
+    if (rc < 0) {
+        return rc;
+    }
     return SUCCESS;
 }
 
@@ -245,6 +249,39 @@ int ensurePathExists(LocalFileSystem* const fs, const vector<string>& pathCompon
         currentInode = nextInode;
     }
     targetInode = currentInode;
+
+    return SUCCESS;
+}
+
+int deleteEntry(LocalFileSystem* const fs, vector<string>& pathComponents)
+{
+    if (pathComponents.size() > 1) {
+        string entryNameToDelete = pathComponents.back();
+        pathComponents.pop_back();
+
+        // validate name to delete
+        int rc = validateName(entryNameToDelete);
+        if (rc != SUCCESS) {
+            return rc;
+        }
+
+        // grab inode number of parent directory
+        size_t parentDirInodeNum;
+        rc = navigateToDirectory(fs, pathComponents, parentDirInodeNum);
+        if (rc != SUCCESS) {
+            return rc;
+        }
+
+        // delete entry
+        rc = fs->unlink(parentDirInodeNum, entryNameToDelete);
+        if (rc == -ENOTFOUND) {
+            return NOT_FOUND;
+        }
+
+        if (rc != SUCCESS) {
+            return rc;
+        }
+    }
 
     return SUCCESS;
 }
